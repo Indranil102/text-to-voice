@@ -1,4 +1,5 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
+import axios from "axios";
 import "./App.css";
 
 export default function App() {
@@ -10,6 +11,9 @@ export default function App() {
   const [pitch, setPitch] = useState(1);
   const [volume, setVolume] = useState(1);
   const [darkMode, setDarkMode] = useState(false);
+  const [audioUrl, setAudioUrl] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const synthRef = useRef(window.speechSynthesis);
   const utteranceRef = useRef(null);
@@ -95,6 +99,37 @@ export default function App() {
 
   const voicesByLanguage = getVoicesByLanguage();
 
+  // Correct useEffect usage: log audioUrl when it changes
+  useEffect(() => {
+    if (audioUrl) {
+      console.log("Audio URL updated:", audioUrl);
+    }
+  }, [audioUrl]);
+
+  const handleSendToBackend = async () => {
+    setLoading(true);
+    setError("");
+    setAudioUrl("");
+    try {
+      const response = await axios.post(
+        "http://localhost:5001/api/text-to-speech",
+        {
+          text: text,
+          language: voice?.lang?.split("-")[0] || "en",
+        }
+      );
+      if (response.data && response.data.audio_url) {
+        setAudioUrl(`http://localhost:5001${response.data.audio_url}`);
+      } else {
+        setError("No audio URL returned from backend.");
+      }
+    } catch (err) {
+      setError(err.response?.data?.error || "Failed to connect to backend.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className={`app ${darkMode ? "dark-mode" : ""}`}>
       <div className="container">
@@ -122,6 +157,25 @@ export default function App() {
               className="text-input"
               rows={6}
             />
+            <button
+              onClick={handleSendToBackend}
+              disabled={!text.trim() || loading}
+              className="btn btn-secondary"
+              style={{ marginTop: 16 }}
+            >
+              {loading ? "Converting..." : "Convert with Flask Backend"}
+            </button>
+            {audioUrl && (
+              <div style={{ marginTop: 16 }}>
+                <audio controls src={audioUrl} />
+                <a href={audioUrl} download style={{ marginLeft: 12 }}>
+                  Download MP3
+                </a>
+              </div>
+            )}
+            {error && (
+              <div style={{ color: "#ff6b6b", marginTop: 12 }}>{error}</div>
+            )}
           </div>
 
           <div className="controls-section">

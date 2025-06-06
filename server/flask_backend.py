@@ -8,7 +8,7 @@ from io import BytesIO
 import logging
 
 app = Flask(__name__)
-CORS(app)  # Enable CORS for frontend connections
+CORS(app, origins=["http://localhost:5173"])  # Allow Vite frontend
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -113,4 +113,4 @@ def cleanup_files():
         return jsonify({'error': f'Cleanup failed: {str(e)}'}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=5001)
