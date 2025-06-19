@@ -1,0 +1,6 @@
+Flask
+flask-cors
+gtts
+TTS
+werkzeug
+requests 
