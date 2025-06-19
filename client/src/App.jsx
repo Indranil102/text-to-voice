@@ -14,6 +14,12 @@ export default function App() {
   const [audioUrl, setAudioUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [isRecording, setIsRecording] = useState(false);
+  const [mediaRecorder, setMediaRecorder] = useState(null);
+  const [recordedChunks, setRecordedChunks] = useState([]);
+  const [recordedAudioUrl, setRecordedAudioUrl] = useState("");
+  const [uploadStatus, setUploadStatus] = useState("");
+  const mediaStreamRef = useRef(null);
 
   const synthRef = useRef(window.speechSynthesis);
   const utteranceRef = useRef(null);
@@ -130,6 +136,70 @@ export default function App() {
     }
   };
 
+  // Start recording
+  const handleStartRecording = async () => {
+    setUploadStatus("");
+    setRecordedAudioUrl("");
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+      const recorder = new window.MediaRecorder(stream);
+      setMediaRecorder(recorder);
+      setRecordedChunks([]);
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          setRecordedChunks((prev) => [...prev, e.data]);
+        }
+      };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        const blob = new Blob(recordedChunks, { type: "audio/webm" });
+        const url = URL.createObjectURL(blob);
+        setRecordedAudioUrl(url);
+      };
+      recorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      setUploadStatus("Microphone access denied or not available.");
+    }
+  };
+
+  // Stop recording
+  const handleStopRecording = () => {
+    if (mediaRecorder) {
+      mediaRecorder.stop();
+      setIsRecording(false);
+    }
+  };
+
+  // Upload recorded audio to backend
+  const handleUploadRecording = async () => {
+    if (!recordedChunks.length) return;
+    setUploadStatus("Uploading...");
+    const blob = new Blob(recordedChunks, { type: "audio/webm" });
+    const formData = new FormData();
+    formData.append("audio", blob, `recording-${Date.now()}.webm`);
+    try {
+      const response = await axios.post(
+        "http://localhost:5001/api/upload-audio",
+        formData,
+        {
+          headers: { "Content-Type": "multipart/form-data" },
+        }
+      );
+      if (response.data && response.data.audio_url) {
+        setUploadStatus("Upload successful!");
+        setRecordedAudioUrl(`http://localhost:5001${response.data.audio_url}`);
+      } else {
+        setUploadStatus("Upload failed: No audio URL returned.");
+      }
+    } catch (err) {
+      setUploadStatus(
+        "Upload failed: " + (err.response?.data?.error || err.message)
+      );
+    }
+  };
+
   return (
     <div className={`app ${darkMode ? "dark-mode" : ""}`}>
       <div className="container">
@@ -175,6 +245,37 @@ export default function App() {
             )}
             {error && (
               <div style={{ color: "#ff6b6b", marginTop: 12 }}>{error}</div>
+            )}
+          </div>
+
+          <div className="audio-record-section" style={{ marginTop: 32 }}>
+            <h2>🎙️ Record Your Voice</h2>
+            <button
+              onClick={isRecording ? handleStopRecording : handleStartRecording}
+              className="btn btn-primary"
+              style={{ marginRight: 12 }}
+              disabled={loading}
+            >
+              {isRecording ? "Stop Recording" : "Start Recording"}
+            </button>
+            <button
+              onClick={handleUploadRecording}
+              className="btn btn-secondary"
+              style={{ marginTop: 16 }}
+              disabled={isRecording || !recordedChunks.length || loading}
+            >
+              Upload Recording
+            </button>
+            {uploadStatus && (
+              <div style={{ marginTop: 12 }}>{uploadStatus}</div>
+            )}
+            {recordedAudioUrl && (
+              <div style={{ marginTop: 16 }}>
+                <audio controls src={recordedAudioUrl} />
+                <a href={recordedAudioUrl} download style={{ marginLeft: 12 }}>
+                  Download Recording
+                </a>
+              </div>
             )}
           </div>
 
