@@ -14,12 +14,12 @@ export default function App() {
   const [audioUrl, setAudioUrl] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [isRecording, setIsRecording] = useState(false);
-  const [mediaRecorder, setMediaRecorder] = useState(null);
-  const [recordedChunks, setRecordedChunks] = useState([]);
-  const [recordedAudioUrl, setRecordedAudioUrl] = useState("");
-  const [uploadStatus, setUploadStatus] = useState("");
-  const mediaStreamRef = useRef(null);
+  const [chatQuestion, setChatQuestion] = useState("");
+  const [chatResponse, setChatResponse] = useState("");
+  const [chatAudioUrl, setChatAudioUrl] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [availableModels, setAvailableModels] = useState([]);
+  const [selectedModel, setSelectedModel] = useState("llama2");
 
   const synthRef = useRef(window.speechSynthesis);
   const utteranceRef = useRef(null);
@@ -40,6 +40,59 @@ export default function App() {
       synthRef.current.removeEventListener("voiceschanged", loadVoices);
     };
   }, [voice]);
+
+  // Fetch available models from backend
+  React.useEffect(() => {
+    const fetchModels = async () => {
+      try {
+        const response = await axios.get("http://localhost:5001/api/models");
+        if (response.data.success) {
+          setAvailableModels(response.data.models);
+        }
+      } catch (err) {
+        console.error("Failed to fetch models:", err);
+      }
+    };
+
+    fetchModels();
+  }, []);
+
+  const handleAskQuestion = async () => {
+    if (!chatQuestion.trim()) return;
+
+    setChatLoading(true);
+    setChatResponse("");
+    setChatAudioUrl("");
+    setError("");
+
+    try {
+      const response = await axios.post(
+        "http://localhost:5001/api/chat-and-speak",
+        {
+          question: chatQuestion,
+          language: voice?.lang?.split("-")[0] || "en",
+          model: selectedModel,
+        }
+      );
+
+      const data = response.data;
+
+      if (data.success) {
+        setChatResponse(data.response);
+        if (data.audio_url) {
+          setChatAudioUrl(`http://localhost:5001${data.audio_url}`);
+        }
+      } else {
+        setError("Error: No valid response from the AI model.");
+      }
+    } catch (err) {
+      const errorMessage = err.response?.data?.error || err.message;
+      setError(`Error: ${errorMessage}`);
+      console.error("Chat request failed:", err);
+    } finally {
+      setChatLoading(false);
+    }
+  };
 
   const handleSpeak = () => {
     if (!text.trim()) return;
@@ -136,70 +189,6 @@ export default function App() {
     }
   };
 
-  // Start recording
-  const handleStartRecording = async () => {
-    setUploadStatus("");
-    setRecordedAudioUrl("");
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaStreamRef.current = stream;
-      const recorder = new window.MediaRecorder(stream);
-      setMediaRecorder(recorder);
-      setRecordedChunks([]);
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          setRecordedChunks((prev) => [...prev, e.data]);
-        }
-      };
-      recorder.onstop = () => {
-        stream.getTracks().forEach((track) => track.stop());
-        const blob = new Blob(recordedChunks, { type: "audio/webm" });
-        const url = URL.createObjectURL(blob);
-        setRecordedAudioUrl(url);
-      };
-      recorder.start();
-      setIsRecording(true);
-    } catch (err) {
-      setUploadStatus("Microphone access denied or not available.");
-    }
-  };
-
-  // Stop recording
-  const handleStopRecording = () => {
-    if (mediaRecorder) {
-      mediaRecorder.stop();
-      setIsRecording(false);
-    }
-  };
-
-  // Upload recorded audio to backend
-  const handleUploadRecording = async () => {
-    if (!recordedChunks.length) return;
-    setUploadStatus("Uploading...");
-    const blob = new Blob(recordedChunks, { type: "audio/webm" });
-    const formData = new FormData();
-    formData.append("audio", blob, `recording-${Date.now()}.webm`);
-    try {
-      const response = await axios.post(
-        "http://localhost:5001/api/upload-audio",
-        formData,
-        {
-          headers: { "Content-Type": "multipart/form-data" },
-        }
-      );
-      if (response.data && response.data.audio_url) {
-        setUploadStatus("Upload successful!");
-        setRecordedAudioUrl(`http://localhost:5001${response.data.audio_url}`);
-      } else {
-        setUploadStatus("Upload failed: No audio URL returned.");
-      }
-    } catch (err) {
-      setUploadStatus(
-        "Upload failed: " + (err.response?.data?.error || err.message)
-      );
-    }
-  };
-
   return (
     <div className={`app ${darkMode ? "dark-mode" : ""}`}>
       <div className="container">
@@ -248,32 +237,64 @@ export default function App() {
             )}
           </div>
 
-          <div className="audio-record-section" style={{ marginTop: 32 }}>
-            <h2>🎙️ Record Your Voice</h2>
+          <div className="chat-section" style={{ marginTop: 32 }}>
+            <h2>🧠 Ask a Question (Ollama + TTS)</h2>
+
+            <div style={{ marginBottom: 12 }}>
+              <label htmlFor="model-select" className="label">
+                AI Model:
+              </label>
+              <select
+                id="model-select"
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                className="select"
+                style={{ marginLeft: 8 }}
+              >
+                {availableModels.length > 0 ? (
+                  availableModels.map((model) => (
+                    <option key={model} value={model}>
+                      {model}
+                    </option>
+                  ))
+                ) : (
+                  <option value="llama2">llama2</option>
+                )}
+              </select>
+            </div>
+
+            <textarea
+              placeholder="Ask anything (e.g., What is AI?)"
+              value={chatQuestion}
+              onChange={(e) => setChatQuestion(e.target.value)}
+              rows={4}
+              className="text-input"
+              style={{ marginBottom: 12 }}
+            />
             <button
-              onClick={isRecording ? handleStopRecording : handleStartRecording}
+              onClick={handleAskQuestion}
+              disabled={!chatQuestion.trim() || chatLoading}
               className="btn btn-primary"
-              style={{ marginRight: 12 }}
-              disabled={loading}
             >
-              {isRecording ? "Stop Recording" : "Start Recording"}
+              {chatLoading ? "Thinking..." : "Ask & Get Audio"}
             </button>
-            <button
-              onClick={handleUploadRecording}
-              className="btn btn-secondary"
-              style={{ marginTop: 16 }}
-              disabled={isRecording || !recordedChunks.length || loading}
-            >
-              Upload Recording
-            </button>
-            {uploadStatus && (
-              <div style={{ marginTop: 12 }}>{uploadStatus}</div>
-            )}
-            {recordedAudioUrl && (
+
+            {chatResponse && (
               <div style={{ marginTop: 16 }}>
-                <audio controls src={recordedAudioUrl} />
-                <a href={recordedAudioUrl} download style={{ marginLeft: 12 }}>
-                  Download Recording
+                <strong>Answer:</strong>
+                <p>{chatResponse}</p>
+              </div>
+            )}
+
+            {error && (
+              <div style={{ color: "#ff6b6b", marginTop: 12 }}>{error}</div>
+            )}
+
+            {chatAudioUrl && (
+              <div style={{ marginTop: 12 }}>
+                <audio controls src={chatAudioUrl} />
+                <a href={chatAudioUrl} download style={{ marginLeft: 12 }}>
+                  Download Audio
                 </a>
               </div>
             )}
